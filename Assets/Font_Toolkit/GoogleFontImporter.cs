@@ -308,7 +308,6 @@ public class GoogleFontImporter : EditorWindow
                 if (tag == "monospace" && cat == "monospace") return true;
 
                 // --- Vibe Logic (The "Magic" part) ---
-
                 if (tag == "kids")
                     return cat == "handwriting" || fam.Contains("kid") || fam.Contains("school") ||
                            fam.Contains("child") || fam.Contains("cute") || fam.Contains("doodle") ||
