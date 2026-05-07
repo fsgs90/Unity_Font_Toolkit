@@ -10,39 +10,42 @@ public class GoogleFontImporter : EditorWindow
 {
     private string apiKey = "YOUR_API_KEY_HERE";
     private string searchQuery = "";
-    private string selectedCategory = "All";
     private JArray allFonts = new JArray();
     private List<JToken> filteredFonts = new List<JToken>();
     private Vector2 scrollPos;
 
+    // Preview Logic
     private Font previewFont;
     private string previewText = "The quick brown fox jumps over the lazy dog.";
     private string currentPreviewName = "None (Select a font)";
 
-    private readonly string[] categories = { "All", "sans-serif", "serif", "display", "handwriting", "monospace" };
+    // Filters (Matching Google Fonts Categories)
+    private List<string> selectedTags = new List<string>();
+    private readonly string[] feelingTags = { "Elegant", "Playful", "Retro", "Tech", "Kids", "Loud", "Vintage" };
+    private readonly string[] appearanceTags = { "Sans Serif", "Serif", "Display", "Handwriting", "Monospace" };
 
     [MenuItem("Tools/Google Font Browser")]
     public static void ShowWindow() => GetWindow<GoogleFontImporter>("Font Browser");
 
+    private void OnEnable()
+    {
+        if (!string.IsNullOrEmpty(apiKey) && apiKey != "YOUR_API_KEY_HERE") FetchFontList();
+    }
+
     void OnGUI()
     {
-        // --- PREVIEW HEADER ---
+        // --- 1. PREVIEW HEADER ---
         EditorGUILayout.BeginVertical("helpbox");
         EditorGUILayout.LabelField("LIVE PREVIEW: " + currentPreviewName, EditorStyles.boldLabel);
 
         GUIStyle previewStyle = new GUIStyle(EditorStyles.label);
-        previewStyle.fontSize = 30; // Made it bigger to see clearly
+        previewStyle.fontSize = 28;
         previewStyle.wordWrap = true;
         previewStyle.alignment = TextAnchor.MiddleCenter;
+        if (previewFont != null) previewStyle.font = previewFont;
 
-        if (previewFont != null)
-        {
-            previewStyle.font = previewFont;
-        }
-
-        // Fixed height box for the preview
-        Rect previewRect = GUILayoutUtility.GetRect(100, 80);
-        EditorGUI.DrawRect(previewRect, new Color(0.2f, 0.2f, 0.2f, 1f));
+        Rect previewRect = GUILayoutUtility.GetRect(100, 70);
+        EditorGUI.DrawRect(previewRect, new Color(0.15f, 0.15f, 0.15f, 1f));
         EditorGUI.LabelField(previewRect, previewText, previewStyle);
 
         previewText = EditorGUILayout.TextField("Preview Text", previewText);
@@ -50,60 +53,137 @@ public class GoogleFontImporter : EditorWindow
 
         EditorGUILayout.Space(10);
 
-        // --- SETTINGS ---
+        // --- 2. SEARCH AND API ---
+        EditorGUILayout.BeginVertical("box");
         apiKey = EditorGUILayout.TextField("API Key", apiKey);
 
-        EditorGUILayout.BeginHorizontal();
-        searchQuery = EditorGUILayout.TextField("Search", searchQuery);
-        selectedCategory = categories[EditorGUILayout.Popup(System.Array.IndexOf(categories, selectedCategory), categories, GUILayout.Width(100))];
-        EditorGUILayout.EndHorizontal();
+        EditorGUI.BeginChangeCheck();
+        searchQuery = EditorGUILayout.TextField("Search Fonts", searchQuery);
+        if (EditorGUI.EndChangeCheck()) UpdateSearch();
 
         if (GUILayout.Button("Refresh Font Library")) FetchFontList();
+        EditorGUILayout.EndVertical();
 
+        // --- 3. GOOGLE STYLE FILTERS ---
         EditorGUILayout.Space(5);
+        DrawTagSection("Feeling", feelingTags);
+        DrawTagSection("Appearance", appearanceTags);
 
-        // --- SCROLLABLE LIST ---
+        if (selectedTags.Count > 0)
+        {
+            if (GUILayout.Button("Clear Filters", GUILayout.Width(100))) { selectedTags.Clear(); UpdateSearch(); }
+        }
+
+        EditorGUILayout.Space(10);
+
+        // --- 4. SCROLLABLE LIST ---
         scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
-        if (filteredFonts != null)
+        if (filteredFonts != null && filteredFonts.Count > 0)
         {
             foreach (var font in filteredFonts)
             {
-                EditorGUILayout.BeginHorizontal("box");
-                EditorGUILayout.LabelField(font["family"].ToString(), GUILayout.Width(150));
-
-                if (GUILayout.Button("Preview", GUILayout.Width(70)))
-                    LoadPreview(font["family"].ToString(), font["files"]["regular"].ToString());
-
-                if (GUILayout.Button("Import", GUILayout.ExpandWidth(true)))
-                    DownloadFont(font["family"].ToString(), font["files"]["regular"].ToString(), false);
-
-                EditorGUILayout.EndHorizontal();
+                DrawFontRow(font);
             }
         }
+        else
+        {
+            EditorGUILayout.LabelField("No fonts found. Try changing your filters.", EditorStyles.centeredGreyMiniLabel);
+        }
         EditorGUILayout.EndScrollView();
+    }
+
+    private void DrawTagSection(string title, string[] tags)
+    {
+        EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+        int cols = 2;
+        for (int i = 0; i < tags.Length; i += cols)
+        {
+            EditorGUILayout.BeginHorizontal();
+            for (int j = 0; j < cols; j++)
+            {
+                if (i + j < tags.Length) DrawTagButton(tags[i + j]);
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+        EditorGUILayout.Space(5);
+    }
+
+    private void DrawTagButton(string tag)
+    {
+        bool isActive = selectedTags.Contains(tag);
+        GUI.backgroundColor = isActive ? new Color(0.2f, 0.5f, 1f) : Color.white;
+
+        if (GUILayout.Button(tag, GUILayout.Height(22)))
+        {
+            if (isActive) selectedTags.Remove(tag);
+            else selectedTags.Add(tag);
+            UpdateSearch();
+        }
+        GUI.backgroundColor = Color.white;
+    }
+
+    private void DrawFontRow(JToken font)
+    {
+        string family = font["family"].ToString();
+        EditorGUILayout.BeginHorizontal("box");
+        EditorGUILayout.LabelField(family, EditorStyles.label, GUILayout.Width(180));
+
+        if (GUILayout.Button("Preview", GUILayout.Width(70)))
+            LoadPreview(family, font["files"]["regular"].ToString());
+
+        if (GUILayout.Button("Import TTF", GUILayout.ExpandWidth(true)))
+            DownloadFont(family, font["files"]["regular"].ToString(), false);
+
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private void UpdateSearch()
+    {
+        if (allFonts == null) return;
+
+        filteredFonts = allFonts.Where(f => {
+            string family = f["family"].ToString().ToLower();
+            string cat = f["category"].ToString().ToLower();
+
+            bool matchesSearch = string.IsNullOrEmpty(searchQuery) || family.Contains(searchQuery.ToLower());
+            if (!matchesSearch) return false;
+
+            if (selectedTags.Count == 0) return true;
+
+            return selectedTags.Any(tag => {
+                string t = tag.ToLower();
+                // Appearance mapping
+                if (t == "sans serif" && cat == "sans-serif") return true;
+                if (t == "serif" && cat == "serif") return true;
+                if (t == "display" && cat == "display") return true;
+                if (t == "handwriting" && cat == "handwriting") return true;
+                if (t == "monospace" && cat == "monospace") return true;
+
+                // Feeling mapping (Keyword Logic)
+                if (t == "tech" && (family.Contains("mono") || family.Contains("code") || family.Contains("robot"))) return true;
+                if (t == "retro" && (family.Contains("old") || family.Contains("retro") || family.Contains("vibe"))) return true;
+                if (t == "elegant" && (cat == "serif" && family.Contains("display"))) return true;
+                if (t == "playful" && cat == "display") return true;
+                if (t == "loud" && (family.Contains("black") || family.Contains("bold") || family.Contains("ultra"))) return true;
+                return false;
+            });
+        }).Take(40).ToList();
     }
 
     private void LoadPreview(string family, string url)
     {
         string filePath = DownloadFont(family, url, true);
-
         if (!string.IsNullOrEmpty(filePath))
         {
-            // IMPORTANT: This line forces Unity to wait until the file is fully imported
-            AssetDatabase.ImportAsset(filePath, ImportAssetOptions.ForceUpdate);
-
+            AssetDatabase.ImportAsset(filePath, ImportAssetOptions.ForceSynchronousImport);
             previewFont = AssetDatabase.LoadAssetAtPath<Font>(filePath);
             currentPreviewName = family;
-
-            if (previewFont == null) Debug.LogWarning("Font imported but not yet loaded. Try clicking Preview again.");
-
             Repaint();
         }
     }
 
     private string DownloadFont(string name, string url, bool isPreview)
     {
-        // Removed the unused 'previewDir' variable to fix your warning
         string folder = isPreview ? "Assets/Fonts/Previews" : "Assets/Fonts";
         if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
@@ -119,20 +199,14 @@ public class GoogleFontImporter : EditorWindow
                     wc.DownloadFile(url, filePath);
                     AssetDatabase.ImportAsset(filePath, ImportAssetOptions.ForceSynchronousImport);
                 }
-                catch
-                {
-                    Debug.LogError("Download failed for " + name);
-                    return null;
-                }
+                catch { return null; }
             }
         }
-
         if (!isPreview)
         {
-            Debug.Log($"<b>{name}</b> ready in Assets/Fonts");
+            Debug.Log($"Imported: {name}");
             EditorGUIUtility.PingObject(AssetDatabase.LoadAssetAtPath<Font>(filePath));
         }
-
         return filePath;
     }
 
@@ -147,16 +221,7 @@ public class GoogleFontImporter : EditorWindow
                 allFonts = JObject.Parse(json)["items"] as JArray;
                 UpdateSearch();
             }
-            catch { Debug.LogError("Check API Key."); }
+            catch { Debug.LogError("API Error. Check your Key."); }
         }
-    }
-
-    private void UpdateSearch()
-    {
-        if (allFonts == null) return;
-        filteredFonts = allFonts
-            .Where(f => (selectedCategory == "All" || f["category"].ToString() == selectedCategory) &&
-                        f["family"].ToString().ToLower().Contains(searchQuery.ToLower()))
-            .Take(40).ToList();
     }
 }
