@@ -279,7 +279,8 @@ public class GoogleFontImporter : EditorWindow
     }
 
     /// <summary>
-    /// Filters the full list based on Search Query and the "Vibe" keywords.
+    /// Filters the full list based on Search Query and curated 'Vibe' keywords.
+    /// Since the API doesn't provide these, we map them manually to font names and categories.
     /// </summary>
     private void UpdateSearch()
     {
@@ -289,27 +290,61 @@ public class GoogleFontImporter : EditorWindow
             string fam = f["family"].ToString().ToLower();
             string cat = f["category"].ToString().ToLower();
 
-            // Text search check
+            // 1. Basic Search Query
             if (!string.IsNullOrEmpty(searchQuery) && !fam.Contains(searchQuery.ToLower())) return false;
 
-            // If no filters selected, show everything
+            // 2. If no tags, show all
             if (selectedTags.Count == 0) return true;
 
-            // Logic to map Google categories and keywords to our custom tags
+            // 3. Expanded Keyword Mapping
             return selectedTags.Any(t => {
                 string tag = t.ToLower();
-                // Direct category match
-                if (tag == cat.Replace("-", " ")) return true;
 
-                // Feeling/Visual mapping logic
-                if (tag == "tech" && (fam.Contains("mono") || fam.Contains("robot") || fam.Contains("code"))) return true;
-                if (tag == "retro" && (fam.Contains("retro") || fam.Contains("pixel") || fam.Contains("arcade"))) return true;
-                if (tag == "kids" && (cat == "handwriting" && (fam.Contains("school") || fam.Contains("child")))) return true;
-                if (tag == "elegant" && (cat == "serif" || fam.Contains("display"))) return true;
-                if (tag == "loud" && (fam.Contains("black") || fam.Contains("bold") || fam.Contains("ultra"))) return true;
+                // Standard Google Categories
+                if (tag == "sans serif" && cat == "sans-serif") return true;
+                if (tag == "serif" && cat == "serif") return true;
+                if (tag == "display" && cat == "display") return true;
+                if (tag == "handwriting" && cat == "handwriting") return true;
+                if (tag == "monospace" && cat == "monospace") return true;
+
+                // --- Vibe Logic (The "Magic" part) ---
+
+                if (tag == "kids")
+                    return cat == "handwriting" || fam.Contains("kid") || fam.Contains("school") ||
+                           fam.Contains("child") || fam.Contains("cute") || fam.Contains("doodle") ||
+                           fam.Contains("baby") || fam.Contains("bubb") || fam.Contains("jolly");
+
+                if (tag == "retro")
+                    return fam.Contains("retro") || fam.Contains("pixel") || fam.Contains("arcade") ||
+                           fam.Contains("neon") || fam.Contains("disco") || fam.Contains("80s") ||
+                           fam.Contains("90s") || fam.Contains("vhs") || fam.Contains("vapor");
+
+                if (tag == "vintage")
+                    return fam.Contains("old") || fam.Contains("antique") || fam.Contains("classic") ||
+                           fam.Contains("century") || fam.Contains("western") || fam.Contains("rust") ||
+                           fam.Contains("typewriter") || fam.Contains("victorian");
+
+                if (tag == "tech")
+                    return fam.Contains("mono") || fam.Contains("code") || fam.Contains("robot") ||
+                           fam.Contains("data") || fam.Contains("orbitron") || fam.Contains("future") ||
+                           fam.Contains("scifi") || fam.Contains("grid");
+
+                if (tag == "loud")
+                    return fam.Contains("black") || fam.Contains("bold") || fam.Contains("ultra") ||
+                           fam.Contains("heavy") || fam.Contains("fat") || fam.Contains("press") ||
+                           fam.Contains("impact");
+
+                if (tag == "elegant")
+                    return (cat == "serif" && (fam.Contains("light") || fam.Contains("display"))) ||
+                           fam.Contains("script") || fam.Contains("formal") || fam.Contains("thin") ||
+                           fam.Contains("grace");
+
+                if (tag == "playful")
+                    return fam.Contains("round") || fam.Contains("bubble") || fam.Contains("comic") ||
+                           fam.Contains("bounce") || fam.Contains("jolly") || fam.Contains("funny");
 
                 return false;
             });
-        }).Take(30).ToList(); // Limit count for UI performance
+        }).Take(40).ToList(); // Increased limit slightly to show more variety
     }
 }
