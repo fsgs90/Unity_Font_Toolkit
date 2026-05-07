@@ -18,8 +18,10 @@ public class GoogleFontImporter : EditorWindow
     private Font previewFont;
     private string previewText = "The quick brown fox jumps over the lazy dog.";
     private string currentPreviewName = "None (Select a font)";
+    private float previewFontSize = 30;
+    private Vector2 previewScrollPos;
 
-    // Filters (Matching Google Fonts Categories)
+    // Filters
     private List<string> selectedTags = new List<string>();
     private readonly string[] feelingTags = { "Elegant", "Playful", "Retro", "Tech", "Kids", "Loud", "Vintage" };
     private readonly string[] appearanceTags = { "Sans Serif", "Serif", "Display", "Handwriting", "Monospace" };
@@ -34,26 +36,12 @@ public class GoogleFontImporter : EditorWindow
 
     void OnGUI()
     {
-        // --- 1. PREVIEW HEADER ---
-        EditorGUILayout.BeginVertical("helpbox");
-        EditorGUILayout.LabelField("LIVE PREVIEW: " + currentPreviewName, EditorStyles.boldLabel);
-
-        GUIStyle previewStyle = new GUIStyle(EditorStyles.label);
-        previewStyle.fontSize = 28;
-        previewStyle.wordWrap = true;
-        previewStyle.alignment = TextAnchor.MiddleCenter;
-        if (previewFont != null) previewStyle.font = previewFont;
-
-        Rect previewRect = GUILayoutUtility.GetRect(100, 70);
-        EditorGUI.DrawRect(previewRect, new Color(0.15f, 0.15f, 0.15f, 1f));
-        EditorGUI.LabelField(previewRect, previewText, previewStyle);
-
-        previewText = EditorGUILayout.TextField("Preview Text", previewText);
-        EditorGUILayout.EndVertical();
+        // 1. THE NEW DYNAMIC PREVIEW HEADER
+        DrawPreviewHeader();
 
         EditorGUILayout.Space(10);
 
-        // --- 2. SEARCH AND API ---
+        // 2. SEARCH AND API
         EditorGUILayout.BeginVertical("box");
         apiKey = EditorGUILayout.TextField("API Key", apiKey);
 
@@ -64,7 +52,7 @@ public class GoogleFontImporter : EditorWindow
         if (GUILayout.Button("Refresh Font Library")) FetchFontList();
         EditorGUILayout.EndVertical();
 
-        // --- 3. GOOGLE STYLE FILTERS ---
+        // 3. TAG FILTERS
         EditorGUILayout.Space(5);
         DrawTagSection("Feeling", feelingTags);
         DrawTagSection("Appearance", appearanceTags);
@@ -76,7 +64,7 @@ public class GoogleFontImporter : EditorWindow
 
         EditorGUILayout.Space(10);
 
-        // --- 4. SCROLLABLE LIST ---
+        // 4. SCROLLABLE LIST
         scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
         if (filteredFonts != null && filteredFonts.Count > 0)
         {
@@ -90,6 +78,41 @@ public class GoogleFontImporter : EditorWindow
             EditorGUILayout.LabelField("No fonts found. Try changing your filters.", EditorStyles.centeredGreyMiniLabel);
         }
         EditorGUILayout.EndScrollView();
+    }
+
+    private void DrawPreviewHeader()
+    {
+        EditorGUILayout.BeginVertical("helpbox");
+
+        // Header Line
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("LIVE PREVIEW: " + currentPreviewName, EditorStyles.boldLabel);
+        GUILayout.FlexibleSpace();
+        EditorGUILayout.LabelField("Size", GUILayout.Width(35));
+        previewFontSize = EditorGUILayout.Slider(previewFontSize, 10, 120, GUILayout.Width(150));
+        EditorGUILayout.EndHorizontal();
+
+        // Style Setup
+        GUIStyle previewStyle = new GUIStyle(EditorStyles.wordWrappedLabel);
+        previewStyle.fontSize = (int)previewFontSize;
+        previewStyle.alignment = TextAnchor.UpperLeft;
+        previewStyle.normal.textColor = Color.white;
+        previewStyle.padding = new RectOffset(10, 10, 10, 10);
+        if (previewFont != null) previewStyle.font = previewFont;
+
+        // Calculate height for the content
+        float calculatedHeight = previewStyle.CalcHeight(new GUIContent(previewText), position.width - 40);
+
+        // Scrollable Preview Area
+        previewScrollPos = EditorGUILayout.BeginScrollView(previewScrollPos, "box", GUILayout.Height(Mathf.Min(calculatedHeight + 30, 250)));
+        EditorGUILayout.SelectableLabel(previewText, previewStyle, GUILayout.Height(calculatedHeight + 10));
+        EditorGUILayout.EndScrollView();
+
+        // Text Input
+        EditorGUILayout.Space(2);
+        previewText = EditorGUILayout.TextField(previewText);
+
+        EditorGUILayout.EndVertical();
     }
 
     private void DrawTagSection(string title, string[] tags)
@@ -140,26 +163,19 @@ public class GoogleFontImporter : EditorWindow
     private void UpdateSearch()
     {
         if (allFonts == null) return;
-
         filteredFonts = allFonts.Where(f => {
             string family = f["family"].ToString().ToLower();
             string cat = f["category"].ToString().ToLower();
-
             bool matchesSearch = string.IsNullOrEmpty(searchQuery) || family.Contains(searchQuery.ToLower());
             if (!matchesSearch) return false;
-
             if (selectedTags.Count == 0) return true;
-
             return selectedTags.Any(tag => {
                 string t = tag.ToLower();
-                // Appearance mapping
                 if (t == "sans serif" && cat == "sans-serif") return true;
                 if (t == "serif" && cat == "serif") return true;
                 if (t == "display" && cat == "display") return true;
                 if (t == "handwriting" && cat == "handwriting") return true;
                 if (t == "monospace" && cat == "monospace") return true;
-
-                // Feeling mapping (Keyword Logic)
                 if (t == "tech" && (family.Contains("mono") || family.Contains("code") || family.Contains("robot"))) return true;
                 if (t == "retro" && (family.Contains("old") || family.Contains("retro") || family.Contains("vibe"))) return true;
                 if (t == "elegant" && (cat == "serif" && family.Contains("display"))) return true;
@@ -186,7 +202,6 @@ public class GoogleFontImporter : EditorWindow
     {
         string folder = isPreview ? "Assets/Fonts/Previews" : "Assets/Fonts";
         if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
-
         string fileName = name.Replace(" ", "_") + (isPreview ? "_Preview" : "") + ".ttf";
         string filePath = Path.Combine(folder, fileName);
 
