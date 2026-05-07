@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEditor;
 using System.Net;
 using System.IO;
@@ -9,10 +9,14 @@ using System.Linq;
 public class GitFontAgnostic : EditorWindow
 {
     // --- REPO CONFIG ---
-    private string repoOwner = "ryanoasis"; // Default changed for testing
-    private string repoName = "nerd-fonts";
-    private string branch = "master"; // Nerd fonts uses 'master', Google uses 'main'
+    private string repoOwner = "google";
+    private string repoName = "fonts";
+    private string branch = "main";
     private string githubToken = "";
+
+    // --- DISCOVERY STATE ---
+    private List<RepoInfo> discoveredRepos = new List<RepoInfo>();
+    private bool showDiscovery = false;
 
     // --- DATA STATE ---
     private List<FontData> allFonts = new List<FontData>();
@@ -38,6 +42,14 @@ public class GitFontAgnostic : EditorWindow
     private float fontSize = 36;
     private bool compareMode = true;
 
+    public class RepoInfo
+    {
+        public string owner;
+        public string name;
+        public string defaultBranch;
+        public int stars;
+    }
+
     [System.Serializable]
     public class FontData
     {
@@ -45,30 +57,96 @@ public class GitFontAgnostic : EditorWindow
         public string downloadUrl;
     }
 
-    [MenuItem("Tools/Universal Git Font Verse")]
-    public static void ShowWindow() => GetWindow<GitFontAgnostic>("Universal Git Font Verse");
+    [MenuItem("Tools/Master Font Verse")]
+    public static void ShowWindow() => GetWindow<GitFontAgnostic>("Master Font Verse");
 
     void OnGUI()
     {
+        DrawDiscoveryHeader();
         DrawHeader();
         DrawABPreview();
+
         EditorGUILayout.Space(5);
         DrawFilterControls();
-        EditorGUILayout.Space(5);
+
         DrawFontList();
         DrawPagination();
+    }
+
+    private void DrawDiscoveryHeader()
+    {
+        EditorGUILayout.BeginVertical("box");
+        if (GUILayout.Button(showDiscovery ? "▲ Hide Discovery" : "▼ Discover Trending Font Repos (GitHub Topics)", EditorStyles.toolbarButton))
+        {
+            showDiscovery = !showDiscovery;
+            if (showDiscovery && discoveredRepos.Count == 0) DiscoverRepos();
+        }
+
+        if (showDiscovery)
+        {
+            scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(120));
+            foreach (var repo in discoveredRepos)
+            {
+                EditorGUILayout.BeginHorizontal("helpbox");
+                EditorGUILayout.LabelField($"{repo.owner}/{repo.name}", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"★ {repo.stars}", GUILayout.Width(60));
+                if (GUILayout.Button("Load", GUILayout.Width(50)))
+                {
+                    repoOwner = repo.owner;
+                    repoName = repo.name;
+                    branch = repo.defaultBranch;
+                    FetchFonts();
+                    showDiscovery = false;
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+            EditorGUILayout.EndScrollView();
+        }
+        EditorGUILayout.EndVertical();
+    }
+
+    private void DiscoverRepos()
+    {
+        string url = "https://api.github.com/search/repositories?q=topic:fonts&sort=stars&order=desc";
+        try
+        {
+            using (WebClient wc = new WebClient())
+            {
+                wc.Headers.Add("User-Agent", "Unity-Font-Verse");
+                if (!string.IsNullOrEmpty(githubToken)) wc.Headers.Add("Authorization", "token " + githubToken);
+                string json = wc.DownloadString(url);
+                JObject root = JObject.Parse(json);
+                JArray items = (JArray)root["items"];
+
+                discoveredRepos.Clear();
+                foreach (var item in items)
+                {
+                    discoveredRepos.Add(new RepoInfo
+                    {
+                        owner = item["owner"]["login"].ToString(),
+                        name = item["name"].ToString(),
+                        defaultBranch = item["default_branch"].ToString(),
+                        stars = (int)item["stargazers_count"]
+                    });
+                }
+            }
+        }
+        catch { Debug.LogError("Discovery failed. Check Token."); }
     }
 
     private void DrawHeader()
     {
         EditorGUILayout.BeginVertical("box");
-        EditorGUILayout.LabelField("UNIVERSAL GIT SETTINGS", EditorStyles.boldLabel);
+        EditorGUILayout.BeginHorizontal();
         repoOwner = EditorGUILayout.TextField("Owner", repoOwner);
         repoName = EditorGUILayout.TextField("Repo", repoName);
+        EditorGUILayout.EndHorizontal();
         branch = EditorGUILayout.TextField("Branch", branch);
-        githubToken = EditorGUILayout.PasswordField("GitHub Token (Highly Recommended)", githubToken);
+        githubToken = EditorGUILayout.PasswordField("GitHub Token (PAT)", githubToken);
 
-        if (GUILayout.Button(isSearching ? "Mapping Repository Structure..." : "Sync Any GitHub Repo", GUILayout.Height(30))) FetchFonts();
+        GUI.backgroundColor = Color.green;
+        if (GUILayout.Button(isSearching ? "Syncing..." : "Sync Repository Content", GUILayout.Height(25))) FetchFonts();
+        GUI.backgroundColor = Color.white;
         EditorGUILayout.EndVertical();
     }
 
@@ -88,12 +166,12 @@ public class GitFontAgnostic : EditorWindow
             wordWrap = true
         };
 
-        EditorGUILayout.BeginHorizontal(GUILayout.Height(150));
+        EditorGUILayout.BeginHorizontal(GUILayout.Height(140));
         DrawPreviewSlot("SLOT A: " + nameA, fontA, nameA, fontStyle);
         if (compareMode) DrawPreviewSlot("SLOT B: " + nameB, fontB, nameB, fontStyle);
         EditorGUILayout.EndHorizontal();
 
-        testText = EditorGUILayout.TextField(testText);
+        testText = EditorGUILayout.TextField("Preview Text", testText);
         EditorGUILayout.EndVertical();
     }
 
@@ -105,9 +183,7 @@ public class GitFontAgnostic : EditorWindow
         {
             style.font = f;
             EditorGUILayout.LabelField(testText, style, GUILayout.ExpandHeight(true));
-            GUI.backgroundColor = new Color(0.4f, 1f, 0.4f);
             if (GUILayout.Button("Import to Project")) ExportFont(fontName, f);
-            GUI.backgroundColor = Color.white;
         }
         else
         {
@@ -120,7 +196,7 @@ public class GitFontAgnostic : EditorWindow
     {
         EditorGUILayout.BeginVertical("box");
         EditorGUI.BeginChangeCheck();
-        searchQuery = EditorGUILayout.TextField("Search", searchQuery, "SearchTextField");
+        searchQuery = EditorGUILayout.TextField("Search Name", searchQuery, "SearchTextField");
 
         EditorGUILayout.BeginHorizontal();
         foreach (var v in vibes)
@@ -151,7 +227,7 @@ public class GitFontAgnostic : EditorWindow
         foreach (var font in pageItems)
         {
             EditorGUILayout.BeginHorizontal("box");
-            EditorGUILayout.LabelField(font.name, EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(font.name);
             if (GUILayout.Button("Set A", GUILayout.Width(50))) LoadToSlot(font, true);
             if (compareMode && GUILayout.Button("Set B", GUILayout.Width(50))) LoadToSlot(font, false);
             EditorGUILayout.EndHorizontal();
@@ -164,10 +240,12 @@ public class GitFontAgnostic : EditorWindow
         int maxPages = Mathf.Max(1, Mathf.CeilToInt((float)filteredFonts.Count / ItemsPerPage));
         EditorGUILayout.BeginHorizontal("box");
         if (GUILayout.Button("<<")) currentPage = Mathf.Max(0, currentPage - 1);
-        EditorGUILayout.LabelField($"Page {currentPage + 1}/{maxPages} ({filteredFonts.Count} fonts)", EditorStyles.centeredGreyMiniLabel);
+        EditorGUILayout.LabelField($"Page {currentPage + 1} / {maxPages} ({filteredFonts.Count} fonts)", EditorStyles.centeredGreyMiniLabel);
         if (GUILayout.Button(">>")) currentPage = Mathf.Min(maxPages - 1, currentPage + 1);
         EditorGUILayout.EndHorizontal();
     }
+
+    // --- LOGIC ---
 
     private void FetchFonts()
     {
@@ -179,30 +257,20 @@ public class GitFontAgnostic : EditorWindow
         {
             using (WebClient wc = new WebClient())
             {
-                wc.Headers.Add("User-Agent", "Unity-Universal-Font-Tool");
+                wc.Headers.Add("User-Agent", "Unity-Master-Font-Verse");
                 if (!string.IsNullOrEmpty(githubToken)) wc.Headers.Add("Authorization", "token " + githubToken);
 
                 string json = wc.DownloadString(url);
                 JObject root = JObject.Parse(json);
-                JArray tree = root["tree"] as JArray;
+                JArray tree = (JArray)root["tree"];
 
                 foreach (var node in tree)
                 {
                     string path = node["path"].ToString();
-
-                    // UNIVERSAL LOGIC: Look for any .ttf or .otf
                     if (path.EndsWith(".ttf") || path.EndsWith(".otf"))
                     {
-                        // Skip Nerd Font specific "Windows Compatible" duplicates to keep list clean
                         if (path.Contains("Windows Compatible")) continue;
-
                         string fileName = Path.GetFileNameWithoutExtension(path);
-
-                        // Try to get a clean Family Name from the path
-                        string[] parts = path.Split('/');
-                        string familyName = parts.Length > 1 ? parts[parts.Length - 2] : fileName;
-
-                        // Only add unique families or unique files
                         if (!allFonts.Any(f => f.name == fileName))
                         {
                             allFonts.Add(new FontData
@@ -214,31 +282,26 @@ public class GitFontAgnostic : EditorWindow
                     }
                 }
                 FilterList();
-                Debug.Log($"Successfully mapped {allFonts.Count} fonts from {repoName}");
             }
         }
-        catch (System.Exception e)
-        {
-            Debug.LogError("Repo Access Error: " + e.Message);
-            if (e.Message.Contains("403")) Debug.LogError("GitHub Rate Limit hit. You MUST use a Token for large repos like Nerd Fonts.");
-        }
+        catch (System.Exception e) { Debug.LogError("Fetch Error: " + e.Message); }
         isSearching = false;
     }
-
-    // ... [LoadToSlot, DownloadToTemp, ExportFont, FilterList, CheckLetterGroup, GuessVibe same as previous version] ...
-    // (Ensure you include the logic methods from the previous response here)
 
     private void LoadToSlot(FontData data, bool isA)
     {
         string path = DownloadToTemp(data);
         if (string.IsNullOrEmpty(path)) return;
+
         AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
         AssetDatabase.Refresh();
+
         Font loadedFont = AssetDatabase.LoadAssetAtPath<Font>(path);
         if (loadedFont != null)
         {
             loadedFont.RequestCharactersInTexture(testText, (int)fontSize, FontStyle.Normal);
-            if (isA) { fontA = loadedFont; nameA = data.name; } else { fontB = loadedFont; nameB = data.name; }
+            if (isA) { fontA = loadedFont; nameA = data.name; }
+            else { fontB = loadedFont; nameB = data.name; }
             Repaint();
         }
     }
@@ -249,13 +312,16 @@ public class GitFontAgnostic : EditorWindow
         string relPath = "Assets/Fonts/Previews/" + data.name.Replace(" ", "_") + "_P" + ext;
         string fullPath = Path.Combine(Application.dataPath.Replace("Assets", ""), relPath);
         if (!Directory.Exists(Path.GetDirectoryName(fullPath))) Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
-        try { new WebClient().DownloadFile(data.downloadUrl, fullPath); } catch { return null; }
+
+        if (!File.Exists(fullPath))
+        {
+            try { new WebClient().DownloadFile(data.downloadUrl, fullPath); } catch { return null; }
+        }
         return relPath;
     }
 
     private void ExportFont(string name, Font font)
     {
-        if (font == null) return;
         string sourcePath = AssetDatabase.GetAssetPath(font);
         string ext = Path.GetExtension(sourcePath);
         string destDir = "Assets/Fonts/Imported";
@@ -295,10 +361,10 @@ public class GitFontAgnostic : EditorWindow
     private string GuessVibe(string name)
     {
         name = name.ToLower();
-        if (name.Contains("mono") || name.Contains("code") || name.Contains("nerd")) return "Tech";
+        if (name.Contains("mono") || name.Contains("code")) return "Tech";
         if (name.Contains("pixel") || name.Contains("arcade")) return "Retro";
-        if (name.Contains("script") || name.Contains("light")) return "Elegant";
-        if (name.Contains("bold") || name.Contains("black")) return "Loud";
+        if (name.Contains("script") || name.Contains("cursive")) return "Elegant";
+        if (name.Contains("bold") || name.Contains("black") || name.Contains("ultra")) return "Loud";
         return "General";
     }
 }
